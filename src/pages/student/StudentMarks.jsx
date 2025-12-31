@@ -1,0 +1,86 @@
+import React, { useEffect, useState } from 'react';
+import { useSelector } from 'react-redux';
+import service from '../../appwrite/db';
+
+export default function StudentMarks() {
+    const { userData } = useSelector((state) => state.auth);
+    const [profile, setProfile] = useState(null);
+    const [marks, setMarks] = useState([]);
+    const [selectedExam, setSelectedExam] = useState('Exam 1');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        if (userData) loadMarks();
+    }, [userData]);
+
+    const loadMarks = async () => {
+        setLoading(true);
+        try {
+            const p = await service.getStudentProfile(userData.$id);
+            const stud = p.documents && p.documents[0];
+            setProfile(stud || null);
+            if (stud) {
+                const m = await service.getStudentMarks(stud.$id);
+                setMarks(m.documents || []);
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const exams = ['Exam 1', 'Exam 2', 'Exam 3'];
+
+    // Filter marks by selected exam
+    const marksForExam = marks.filter(m => (m.examtype || '').toLowerCase() === selectedExam.toLowerCase());
+
+    // Get unique subjects for this student
+    const subjects = Array.from(new Set(marks.map(m => m.subject))).filter(Boolean);
+
+    return (
+        <div className="min-h-screen bg-[#f8f7f3] pb-20 p-4 safe-area-top">
+            <h1 className="text-lg font-bold mb-4">My Marks</h1>
+
+            <div className="flex gap-3 mb-4 overflow-x-auto">
+                {exams.map(ex => (
+                    <button key={ex} onClick={() => setSelectedExam(ex)}
+                        className={`min-w-[90px] py-3 px-4 rounded-2xl font-bold text-sm ${selectedExam === ex ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 shadow-sm'}`}>
+                        {ex}
+                    </button>
+                ))}
+            </div>
+
+            {loading ? (
+                <div className="animate-pulse space-y-3">
+                    <div className="h-8 bg-gray-200 rounded"></div>
+                    <div className="h-8 bg-gray-200 rounded"></div>
+                </div>
+            ) : (
+                <div className="space-y-3">
+                    {subjects.length === 0 ? (
+                        <p className="text-sm text-gray-500">No marks available yet.</p>
+                    ) : (
+                        <div className="grid grid-cols-1 gap-3">
+                            {subjects.map(sub => {
+                                const examMark = marksForExam.find(m => m.subject === sub);
+                                return (
+                                    <div key={sub} className="bg-white p-4 rounded-xl shadow-sm flex justify-between items-center">
+                                        <div>
+                                            <p className="font-bold text-gray-800">{sub}</p>
+                                            <p className="text-xs text-gray-400">{examMark ? examMark.examtype : selectedExam}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="font-bold text-blue-600">{examMark ? `${examMark.score}/${examMark.totalmarks}` : '—'}</p>
+                                            <p className="text-xs text-gray-400">{examMark ? `${Math.round((examMark.score / examMark.totalmarks) * 100)}%` : ''}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
