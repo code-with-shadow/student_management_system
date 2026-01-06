@@ -6,7 +6,6 @@ import service from '../../appwrite/db'
 
 export default function ChatPage() {
   const { classIdParam } = useParams()
-  console.log("this i s riya",classIdParam)
   const { userData, userRole, classId: userClass } = useSelector((state) => state.auth)
   const dispatch = useDispatch()
   const navigate = useNavigate()
@@ -78,12 +77,10 @@ export default function ChatPage() {
         if (!mounted) return
         if (res.documents && res.documents.length > 0) {
           const doc = res.documents[0]
-          // Update state with existing settings
           setChatLockedState(Boolean(doc.islocked))
           setChatSettingDocId(doc.$id) 
           dispatch(setChatLock(Boolean(doc.islocked)))
         } else {
-          // No settings found, default to unlocked
           setChatLockedState(false)
           setChatSettingDocId(null)
           dispatch(setChatLock(false))
@@ -96,7 +93,7 @@ export default function ChatPage() {
 
     pollRef.current = setInterval(() => { 
         fetchMessages()
-        loadChatSettings() // Also poll settings to auto-lock for students
+        loadChatSettings()
     }, 4000)
 
     return () => {
@@ -105,7 +102,7 @@ export default function ChatPage() {
     }
   }, [classId])
 
-  // 2. SCROLL LOGIC
+  // 2. SCROLL LOGIC & KEYBOARD HANDLING
   useEffect(() => {
     if (scrollRef.current && !loadingMore && !loading) {
         const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
@@ -115,6 +112,28 @@ export default function ChatPage() {
         }
     }
   }, [messages, loadingMore, loading])
+
+  // ✅ NEW: Handle Mobile Keyboard Resize
+  useEffect(() => {
+    const handleResize = () => {
+        // When keyboard opens, visualViewport height changes. 
+        // We force scroll to bottom so latest messages are visible above keyboard.
+        if (scrollRef.current) {
+            setTimeout(() => {
+                scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, 100);
+        }
+    };
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', handleResize);
+    }
+    return () => {
+        if (window.visualViewport) {
+            window.visualViewport.removeEventListener('resize', handleResize);
+        }
+    };
+  }, []);
 
   const onScroll = async (e) => {
     const el = e.target
@@ -131,9 +150,7 @@ export default function ChatPage() {
   }
 
   const handleSend = async () => {
-    // Strict Lock Check for Students
     if (chatLocked && userRole !== 'teacher') return alert('Chat is locked by the teacher.')
-    
     if (!text.trim() && !selectedFile) return 
     
     const tmpId = 'tmp-' + Date.now()
@@ -181,9 +198,20 @@ export default function ChatPage() {
     else navigate('/student/dashboard')
   }
 
+  // ✅ NEW: Scroll to bottom when input is tapped (Keyboard Opens)
+  const onInputFocus = () => {
+    setTimeout(() => {
+        if(scrollRef.current) {
+            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }
+    }, 300); // Small delay for keyboard animation
+  }
+
   // --- RENDER ---
+  // ✅ FIX 1: Changed "h-[100dvh]" to "fixed inset-0 overflow-hidden" 
+  // This pins the app to the screen edges so the header DOES NOT SCROLL UP
   return (
-    <div className="flex flex-col h-[100dvh] bg-[#f8f7f3]">
+    <div className="flex flex-col fixed inset-0 bg-[#f8f7f3] overflow-hidden">
       
       {/* Header */}
       <header className="shrink-0 h-16 bg-[#008069] text-white flex items-center px-4 justify-between shadow-md z-20">
@@ -211,22 +239,18 @@ export default function ChatPage() {
                 onClick={async () => { 
                     const newLock = !chatLocked; 
                     try { 
-                        // Fix 2: Ensure we pass the DocID so it UPDATES instead of creating new ones
                         const res = await service.setChatSetting({ 
                             docId: chatSettingDocId, 
                             classId: chatClass, 
                             teacherId: userData?.$id, 
                             isLocked: newLock 
                         }); 
-                        
-                        // Update state immediately
                         if(res && res.$id) setChatSettingDocId(res.$id);
                         setChatLockedState(newLock); 
                         dispatch(setChatLock(newLock)); 
                     } catch (e) { alert('Error: ' + e.message) } 
                 }} 
                 className="p-2 rounded-full hover:bg-white/10 transition-colors"
-                title={chatLocked ? "Unlock Chat" : "Lock Chat"}
               >
                 {chatLocked ? 
                     <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-red-300" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM9 8V6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9z"/></svg> 
@@ -241,16 +265,14 @@ export default function ChatPage() {
         </div>
       </header>
 
-      {/* Messages */}
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
+      {/* Messages Area */}
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#e5ddd5]">
+        {/* Added background color pattern-like for WhatsApp feel */}
         {loading ? (
           <div className="flex justify-center mt-10"><div className="w-6 h-6 border-2 border-green-600 border-t-transparent rounded-full animate-spin"></div></div>
         ) : (
           messages.map((msg, index) => {
              const isMe = msg.senderid === userData?.$id;
-             // Fix 1: Removed 'isSequence' check for name display.
-             // Now checking !isMe ensures name shows for all received messages.
-
              let attachmentContent = null;
              if (msg.fileid) {
                  const fileUrl = msg.filetype === 'image' ? (msg.pending ? null : service.getFilePreview(msg.fileid)) : (msg.pending ? "#" : service.getFileDownload(msg.fileid));
@@ -287,7 +309,6 @@ export default function ChatPage() {
                   ${isMe ? 'bg-[#d9fdd3] rounded-l-lg rounded-tr-lg rounded-br-none' : 'bg-white rounded-r-lg rounded-tl-lg rounded-bl-none'}
                   mt-2
                 `}>
-                  {/* ✅ FIX 1: Show Sender Name for ALL messages except my own */}
                   {!isMe && (
                     <div className="text-[11px] font-bold text-orange-600 mb-1 leading-none">
                         {msg.sendername}
@@ -311,13 +332,11 @@ export default function ChatPage() {
       {/* Input Area */}
       <div className="shrink-0 bg-[#f0f2f5] px-3 py-2 flex items-end gap-2 safe-area-bottom z-20">
         
-        {/* ✅ FIX 2: If Locked AND User is Student => Show Gray Box */}
         {chatLocked && userRole !== 'teacher' ? (
            <div className="w-full bg-gray-200 text-gray-500 text-center py-3 text-sm rounded-lg font-medium border border-gray-300">
               🔒 Teacher blocked chat
            </div>
         ) : (
-          /* Normal Input for Everyone else (and Teachers even if locked) */
           <>
             <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileSelect} accept="image/*,application/pdf" />
             <button onClick={() => fileInputRef.current.click()} className="mb-3 p-2 text-gray-500 hover:text-gray-700 transition">
@@ -333,7 +352,18 @@ export default function ChatPage() {
                       <button onClick={() => { setSelectedFile(null); fileInputRef.current.value=""; }} className="text-gray-400 hover:text-red-500 p-1">X</button>
                   </div>
               )}
-              <textarea ref={inputRef} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown} placeholder={chatLocked ? "Message (Locked for students)..." : "Message"} rows={1} className="w-full px-4 py-3 max-h-32 focus:outline-none text-sm resize-none bg-transparent" style={{ minHeight: '44px' }} />
+              {/* ✅ FIX 3: Added onFocus={onInputFocus} to scroll to bottom when keyboard opens */}
+              <textarea 
+                ref={inputRef} 
+                value={text} 
+                onChange={(e) => setText(e.target.value)} 
+                onKeyDown={onKeyDown} 
+                onFocus={onInputFocus}
+                placeholder={chatLocked ? "Message (Locked for students)..." : "Message"} 
+                rows={1} 
+                className="w-full px-4 py-3 max-h-32 focus:outline-none text-sm resize-none bg-transparent" 
+                style={{ minHeight: '44px' }} 
+              />
             </div>
             <button onClick={handleSend} disabled={sending || (!text.trim() && !selectedFile)} className={`w-11 h-11 rounded-full flex items-center justify-center shrink-0 transition-transform active:scale-95 shadow-sm ${(text.trim() || selectedFile) ? 'bg-[#008069] text-white' : 'bg-gray-300 text-gray-500'}`}>
               {sending ? <div className="w-5 h-5 border-2 border-white/50 border-t-white rounded-full animate-spin"></div> : <svg viewBox="0 0 24 24" height="24" width="24" preserveAspectRatio="xMidYMid meet" version="1.1" x="0px" y="0px" enableBackground="new 0 0 24 24"><path fill="currentColor" d="M1.101,21.757L23.8,12.028L1.101,2.3l0.011,7.912l13.623,1.816L1.112,13.845 L1.101,21.757z"></path></svg>}
