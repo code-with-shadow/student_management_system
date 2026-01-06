@@ -155,7 +155,7 @@ function StudentSignup() {
                         <div className="col-span-1">
                             <label className={labelStyle}>Class</label>
                             <select className={inputStyle} value={formData.classId} onChange={e => setFormData({...formData, classId: e.target.value})}>
-                                {[1,2,3,4,5,6,7,8,9,10,11,12].map(c => <option key={c} value={c}>{c}</option>)}
+                                {[5,6,7,8,9,10,11,12].map(c => <option key={c} value={c}>{c}</option>)}
                             </select>
                         </div>
                         <div className="col-span-1">

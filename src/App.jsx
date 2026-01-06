@@ -1,96 +1,85 @@
-import React, { useState, useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
-import { Outlet } from 'react-router-dom'
+
 import authService from './appwrite/auth'
 import service from './appwrite/db'
 import { login, logout } from './store/authSlice'
 
-// Components
 import Header from './components/Header'
-import Footer from './components/Footer' 
+import Footer from './components/Footer'
 
 function App() {
-  const [loading, setLoading] = useState(true)
   const dispatch = useDispatch()
-  
-  // Get Login Status to show/hide Header & Footer
-  const userStatus = useSelector((state) => state.auth.status)
+  const navigate = useNavigate()
+  const location = useLocation()
 
+  const [loading, setLoading] = useState(true)
+
+  const authStatus = useSelector(state => state.auth.status)
+  const userRole = useSelector(state => state.auth.userRole)
+
+  const isChatPage = location.pathname.includes('/chat/')
+
+  // 🔄 RESTORE SESSION
   useEffect(() => {
-    // 1. Check if user is logged in
-    authService.getCurrentUser()
-      .then((userData) => {
-        if (userData) {
-          // Helper to set fallback login
-          const fallbackLogin = () => dispatch(login({ userData, userRole: 'student', classId: null }))
+    const init = async () => {
+      try {
+        const userData = await authService.getCurrentUser()
 
-          // 2. Fetch Role from Database (try once, retry quickly on transient auth failures)
-          service.getUserRole(userData.$id)
-            .then((roleDoc) => {
-                 // If we got a document, use it
-                 if (roleDoc && roleDoc.$id) {
-                     // Normalize DB role typos to application roles
-                     const dbRole = roleDoc.role;
-                     const userRoleNormalized = (dbRole === 'techer' || dbRole === 'pending_techer') ? 'teacher' : dbRole;
-
-                     dispatch(login({ 
-                       userData: userData,
-                       userRole: userRoleNormalized,
-                       classId: roleDoc.class || null 
-                     }))
-                 } else {
-                     // ⚠️ FALLBACK: Document missing in DB
-                     console.warn("User role missing in DB. Logging in as Student default.");
-                     fallbackLogin();
-                 }
-            })
-            .catch((err) => {
-                // If auth was transiently missing (401), try again after a short delay
-                console.warn("Database Role Fetch Failed (trying once more):", err?.message || err);
-                setTimeout(() => {
-                  service.getUserRole(userData.$id)
-                     .then((roleDoc) => {
-                         if (roleDoc && roleDoc.$id) {
-                             dispatch(login({ userData, userRole: roleDoc.role, classId: roleDoc.class || null }));
-                         } else fallbackLogin();
-                     })
-                     .catch((e) => {
-                         console.error("Database Role Fetch Failed twice:", e);
-                         fallbackLogin();
-                     });
-                }, 400);
-            });
-        } else {
+        if (!userData) {
           dispatch(logout())
+          setLoading(false)
+          return
         }
-      })
-      .finally(() => setLoading(false))
-  }, [])
+
+        const roleDoc = await service.getUserRole(userData.$id)
+
+        let role = 'student'
+        let classId = null
+
+        if (roleDoc) {
+          role = roleDoc.role === 'techer' ? 'teacher' : roleDoc.role
+
+          if (role === 'student') {
+            const profile = await service.getStudentProfile(userData.$id)
+            classId = profile?.documents?.[0]?.class || null
+          }
+        }
+
+        dispatch(login({ userData, userRole: role, classId }))
+      } catch {
+        dispatch(logout())
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    init()
+  }, [dispatch])
+
+  // 🚀 AUTO REDIRECT FROM "/"
+  useEffect(() => {
+    if (authStatus && location.pathname === '/') {
+      navigate(userRole === 'teacher' ? '/teacher/dashboard' : '/student/dashboard')
+    }
+  }, [authStatus, userRole, location.pathname])
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100">
-        {/* Loading Spinner */}
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      <div className="h-screen flex items-center justify-center">
+        <div className="animate-spin h-12 w-12 rounded-full border-t-2 border-blue-500" />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
-      
-      {/* 1. Header (Sticky Top) */}
-      {userStatus && <Header />}
-
-      {/* 2. Main Content */}
-      {/* pb-24 adds enough padding at bottom so Footer doesn't cover content */}
-      <main className={`flex-1 w-full ${userStatus ? 'pb-24' : ''}`}>
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+      {authStatus && !isChatPage && <Header />}
+      <main className="flex-1 overflow-y-auto">
         <Outlet />
       </main>
-
-      {/* 3. Footer (Fixed Bottom Navigation) */}
-      {userStatus && <Footer />}
-      
+      {authStatus && !isChatPage && <Footer />}
     </div>
   )
 }

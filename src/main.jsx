@@ -1,59 +1,74 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
-import './index.css'
 import { Provider } from 'react-redux'
-import store from './store/store.js'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import './index.css'
+import {
+  createBrowserRouter,
+  RouterProvider,
+  Navigate,
+  Outlet,
+} from 'react-router-dom'
 
-// --- COMPONENTS ---
-import AuthLayout from './components/AuthLayout.jsx'
+import store from './store/store'
+import App from './App'
+import AuthLayout from './components/AuthLayout'
 
-// --- PAGES: PUBLIC ---
-import Home from './pages/Home.jsx' // The Landing Page
-import Login from './pages/student/StudentLogin.jsx' // Unified Login that handles both student/teacher
-import StudentSignup from './pages/student/StudentSignup.jsx'
-import TeacherSignup from './pages/teacher/TeacherSignup.jsx'
+// Pages
+import Login from './pages/common/AllLogin'
+import TeacherSignup from './pages/teacher/TeacherSignup'
 
-// --- PAGES: STUDENT ---
-import StudentDashboard from './pages/student/StudentDashboard.jsx'
-import StudentAttendance from './pages/student/StudentAttendance.jsx'
-import StudentMarks from './pages/student/StudentMarks.jsx'
+// Student
+import StudentDashboard from './pages/student/StudentDashboard'
+import StudentAttendance from './pages/student/StudentAttendance'
+import StudentMarks from './pages/student/StudentMarks'
 
-// --- PAGES: TEACHER ---
-import TeacherDashboard from './pages/teacher/TeacherDashboard.jsx'
-import ClassesPage from './pages/teacher/ClassesPage.jsx'
-import ClassManager from './pages/teacher/ClassManager.jsx'
-import StudentList from './pages/teacher/StudentList.jsx'
-// import Notices from './pages/teacher/Notices.jsx' // Uncomment if you created this
+// Teacher
+import TeacherDashboard from './pages/teacher/TeacherDashboard'
+import ClassesPage from './pages/teacher/ClassesPage'
+import StudentList from './pages/teacher/StudentList'
+import StudentOverview from './pages/teacher/StudentOverview'
+import StudentSignup from './pages/student/StudentSignup'
 
-// --- PAGES: COMMON ---
-import ChatPage from './pages/common/ChatPage.jsx'
+// Common
+import ChatPage from './pages/common/ChatPage'
 
 const router = createBrowserRouter([
   {
-    path: "/",
+    path: '/',
     element: <App />,
     children: [
-      // ==========================
-      // 🌍 PUBLIC ROUTES (Anyone)
-      // ==========================
+
+      // 🔐 LOGIN (DEFAULT ENTRY)
       {
-        path: "/",
-        element: <Home />,
-      },
-      
-      // STUDENT AUTH
-      {
-        path: "/student/login",
+        index: true,
         element: (
           <AuthLayout authentication={false}>
             <Login />
           </AuthLayout>
         ),
       },
+
+      // 🔁 OLD LOGIN URL REDIRECTS
       {
-        path: "/student/signup",
+        path: 'student/login',
+        element: <Navigate to="/" replace />,
+      },
+      {
+        path: 'teacher/login',
+        element: <Navigate to="/" replace />,
+      },
+
+      // 📝 TEACHER SIGNUP
+      {
+        path: 'teacher/signup',
+        element: (
+          <AuthLayout authentication={false}>
+            <TeacherSignup />
+          </AuthLayout>
+        ),
+      },
+      {
+        path: 'student/signup',
         element: (
           <AuthLayout authentication={false}>
             <StudentSignup />
@@ -61,111 +76,66 @@ const router = createBrowserRouter([
         ),
       },
 
-      // TEACHER AUTH
+      // 🎒 STUDENT ROUTES
       {
-        path: "/teacher/login",
+        path: 'student',
         element: (
-          <AuthLayout authentication={false}>
-            <Login />
+          <AuthLayout authentication={true} role="student">
+            <Outlet />
           </AuthLayout>
         ),
-      },
-      {
-        path: "/teacher/signup",
-        element: (
-          <AuthLayout authentication={false}>
-            <TeacherSignup />
-          </AuthLayout>
-        ),
+        children: [
+          { path: 'dashboard', element: <StudentDashboard /> },
+          { path: 'attendance', element: <StudentAttendance /> },
+          { path: 'marks', element: <StudentMarks /> },
+        ],
       },
 
-      // ==========================
-      // 🎒 STUDENT ROUTES (Protected)
-      // ==========================
+      // 👨‍🏫 TEACHER ROUTES
       {
-        path: "/student/dashboard",
+        path: 'teacher',
         element: (
-          <AuthLayout authentication={true}>
-            <StudentDashboard />
+          <AuthLayout authentication={true} role="teacher">
+            <Outlet />
           </AuthLayout>
         ),
-      },
-      {
-        path: "/student/attendance",
-        element: (
-          <AuthLayout authentication={true}>
-            <StudentAttendance />
-          </AuthLayout>
-        ),
-      },
-      {
-        path: "/student/marks",
-        element: (
-          <AuthLayout authentication={true}>
-            <StudentMarks />
-          </AuthLayout>
-        ),
+        children: [
+          { path: 'dashboard', element: <TeacherDashboard /> },
+          { path: 'classes', element: <ClassesPage /> },
+          { path: 'class/:classId', element: <StudentList /> },
+          { path: 'student/:studentId', element: <StudentOverview /> },
+        ],
       },
 
-      // ==========================
-      // 👨‍🏫 TEACHER ROUTES (Protected)
-      // ==========================
+      // 💬 CHAT ROUTES (Fixed for both Student & Teacher)
       {
-        path: "/teacher/dashboard",
+        path: 'chat',
         element: (
           <AuthLayout authentication={true}>
-            <TeacherDashboard />
+            <Outlet />
           </AuthLayout>
         ),
-      },
-      // Keep Classes page available separately if needed
-      {
-        path: "/teacher/classes",
-        element: (
-          <AuthLayout authentication={true}>
-            <ClassesPage />
-          </AuthLayout>
-        ),
-      },
-      {
-        path: "/teacher/attendance",
-        element: (
-          <AuthLayout authentication={true}>
-            <ClassManager />
-          </AuthLayout>
-        ),
-      },
-      {
-        path: "/teacher/marks",
-        element: (
-          <AuthLayout authentication={true}>
-            <ClassManager />
-          </AuthLayout>
-        ),
-      },
-      {
-        path: "/teacher/class/:classId",
-        element: (
-          <AuthLayout authentication={true}>
-            <StudentList />
-          </AuthLayout>
-        ),
+        children: [
+          // 1. Specific Chat (Teacher selects a class)
+          {
+            path: ':classIdParam',
+            element: <ChatPage />,
+          },
+          // // 2. Default Chat (Student uses their own class automatically)
+          // {
+          //   index: true,
+          //   element: <ChatPage />,
+          // }
+        ]
       },
 
-      // ==========================
-      // 💬 COMMON ROUTES (Chat)
-      // ==========================
+      // ❌ FALLBACK
       {
-        // Dynamic Route: classIdParam will be read inside ChatPage
-        path: "/chat/:classIdParam",
-        element: (
-          <AuthLayout authentication={true}>
-            <ChatPage />
-          </AuthLayout>
-        ),
-      }
-    ]
-  }
+        path: '*',
+        element: <Navigate to="/" replace />,
+      },
+    ],
+  },
 ])
 
 ReactDOM.createRoot(document.getElementById('root')).render(
@@ -173,5 +143,5 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <Provider store={store}>
       <RouterProvider router={router} />
     </Provider>
-  </React.StrictMode>,
+  </React.StrictMode>
 )

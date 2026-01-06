@@ -1,119 +1,204 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import service from '../../appwrite/db';
 
 export default function TeacherDashboard() {
     const { userData } = useSelector((state) => state.auth);
     const [profile, setProfile] = useState(null);
-    const [classes, setClasses] = useState([]);
+    const [classOverviews, setClassOverviews] = useState([]);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (userData) loadTeacherData();
+        if (userData) {
+            loadTeacherData();
+            loadClassToppers();
+        }
     }, [userData]);
 
     const loadTeacherData = async () => {
         try {
-            // 1. Get Teacher Profile
             const p = await service.getTeacherProfile(userData.$id);
             setProfile(p || null);
-
-            // 2. For now, show placeholder classes (you can replace with DB-driven classes later)
-            // In a real app you might fetch classes assigned to the teacher from DB
-            const cls = [
-                { id: '6', name: 'Class 6', section: 'A', students: 45 },
-                { id: '7', name: 'Class 7', section: 'B', students: 32 }
-            ];
-            setClasses(cls);
         } catch (e) {
             console.error(e);
+        }
+    };
+
+    const loadClassToppers = async () => {
+        setLoading(true);
+        const targetClasses = ['5', '6', '7', '8', '9', '10', '11', '12'];
+        const overviewData = [];
+
+        try {
+            await Promise.all(targetClasses.map(async (className) => {
+                const studRes = await service.getStudentsByClass(className);
+                const students = studRes?.documents || [];
+                const totalStudents = students.length;
+
+                if (totalStudents === 0) {
+                    overviewData.push({ className, topper: null, totalStudents: 0 });
+                    return;
+                }
+
+                const marksRes = await service.getExamMarksByClass(className, '3'); 
+                const marks = marksRes?.documents || [];
+
+                const studentTotals = {}; 
+                marks.forEach(m => {
+                    studentTotals[m.studentid] = (studentTotals[m.studentid] || 0) + Number(m.score);
+                });
+
+                const sortedIDs = Object.keys(studentTotals).sort((a, b) => studentTotals[b] - studentTotals[a]);
+                
+                let topper = null;
+                if (sortedIDs.length > 0) {
+                    const topperId = sortedIDs[0];
+                    const topperStudent = students.find(s => s.$id === topperId);
+                    if (topperStudent) {
+                        topper = {
+                            name: topperStudent.fullname,
+                            roll: topperStudent.roll,
+                            score: studentTotals[topperId],
+                            id: topperStudent.$id
+                        };
+                    }
+                }
+
+                overviewData.push({ className, topper, totalStudents });
+            }));
+
+            overviewData.sort((a, b) => Number(a.className) - Number(b.className));
+            setClassOverviews(overviewData);
+
+        } catch (error) {
+            console.error("Error loading class toppers:", error);
         } finally {
             setLoading(false);
         }
     };
 
-    if (loading) return (
+    if (loading && !profile) return (
         <div className="min-h-screen bg-[#f8f7f3] p-4 flex flex-col gap-4 animate-pulse">
             <div className="h-20 bg-gray-200 rounded-xl"></div>
-            <div className="h-40 bg-gray-200 rounded-xl"></div>
-            <div className="h-24 bg-gray-200 rounded-xl"></div>
+            <div className="h-60 bg-gray-200 rounded-xl"></div>
         </div>
     );
 
-    if (!profile) return <div className="p-10 text-center text-gray-500">Profile not found.</div>;
-
-    const initials = profile.fullname ? profile.fullname.substring(0, 2).toUpperCase() : 'TC';
-    const totalStudents = classes.reduce((s, c) => s + (c.students || 0), 0);
+    const initials = profile?.fullname ? profile.fullname.substring(0, 2).toUpperCase() : 'TC';
+    const totalStudentsAll = classOverviews.reduce((acc, item) => acc + item.totalStudents, 0);
 
     return (
         <div className="min-h-screen bg-[#f8f7f3] pb-20 safe-area-top">
+            
+            {/* Header */}
             <div className="px-5 pt-6 pb-2 flex items-center justify-between">
-                <h1 className="text-xl font-bold text-gray-800">Teacher Profile</h1>
-                <Link to="/teacher/class-manager" className="text-sm text-blue-600 font-bold">Manage Classes</Link>
+                <h1 className="text-xl font-bold text-gray-800">Teacher Dashboard</h1>
             </div>
 
+            {/* Profile Card */}
             <div className="mx-4 mt-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                 <div className="flex items-center gap-4">
                     <div className="w-16 h-16 bg-purple-600 rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md ring-4 ring-purple-50">
                         {initials}
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-gray-900 leading-tight">{profile.fullname}</h2>
-                        <p className="text-xs text-gray-500 mt-1">{profile.subject || 'Teacher'}</p>
+                        <h2 className="text-lg font-bold text-gray-900 leading-tight">{profile?.fullname || "Teacher"}</h2>
+                        <p className="text-xs text-gray-500 mt-1">{userData?.email}</p>
                         <div className="flex gap-2 mt-2">
-                            <span className="bg-purple-50 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-100">Subject {profile.subject || ''}</span>
-                            <span className="bg-gray-100 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded border border-gray-200">Phone {profile.phone || '—'}</span>
+                            <span className="bg-purple-50 text-purple-700 text-[10px] font-bold px-2 py-0.5 rounded border border-purple-100">
+                                {profile?.subject || 'Faculty'}
+                            </span>
                         </div>
                     </div>
                 </div>
             </div>
 
+            {/* Quick Stats */}
             <div className="mx-4 mt-6">
-                <h3 className="text-sm font-bold text-gray-600 mb-3 ml-1">Quick Stats</h3>
+                <h3 className="text-sm font-bold text-gray-600 mb-3 ml-1">Quick Overview</h3>
                 <div className="grid grid-cols-3 gap-3">
                     <div className="bg-purple-500 text-white rounded-2xl p-4 text-center shadow-lg shadow-purple-200">
-                        <p className="text-xs font-medium opacity-80 mb-1">Total Classes</p>
-                        <p className="text-2xl font-bold">{classes.length}</p>
+                        <p className="text-xs font-medium opacity-80 mb-1">Classes</p>
+                        <p className="text-2xl font-bold">{classOverviews.length}</p>
                     </div>
-
                     <div className="bg-emerald-500 text-white rounded-2xl p-4 text-center shadow-lg shadow-emerald-200">
-                        <p className="text-xs font-medium opacity-80 mb-1">Total Students</p>
-                        <p className="text-2xl font-bold">{totalStudents}</p>
+                        <p className="text-xs font-medium opacity-80 mb-1">Students</p>
+                        <p className="text-2xl font-bold">{totalStudentsAll}</p>
                     </div>
-
                     <div className="bg-blue-500 text-white rounded-2xl p-4 text-center shadow-lg shadow-blue-200">
-                        <p className="text-xs font-medium opacity-80 mb-1">Messages</p>
-                        <p className="text-2xl font-bold">0</p>
+                        <p className="text-xs font-medium opacity-80 mb-1">Active</p>
+                        <p className="text-2xl font-bold">100%</p>
                     </div>
                 </div>
             </div>
 
-            <div className="mx-4 mt-6">
-                <h3 className="text-sm font-bold text-gray-600 mb-3 ml-1">My Classes</h3>
-                <div className="space-y-4">
-                    {classes.map((cls) => (
-                        <div key={cls.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-purple-50 rounded-xl flex items-center justify-center">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-600"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+            {/* Class Leaders List */}
+            <div className="mx-4 mt-8">
+                <h3 className="text-sm font-bold text-gray-600 mb-3 ml-1 grid grid-cols-4">
+                    <span>Class</span>
+                    <span>Performance</span>
+                    <span>Leaders</span>
+                    <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-center">Exam 3</span>
+                </h3>
+                
+                <div className="flex flex-col gap-3">
+                    {loading ? (
+                        <p className="text-center text-xs text-gray-400 py-10">Calculating rankings...</p>
+                    ) : (
+                        classOverviews.map((item) => (
+                            <div 
+                                key={item.className} 
+                                onClick={() => navigate(`/teacher/class/${item.className}`)} 
+                                className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-purple-300 transition-all active:scale-[0.98]"
+                            >
+                                {/* LEFT: Class + Name */}
+                                <div className="flex items-center gap-3 w-[40%]">
+                                    <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center font-bold text-gray-500 text-sm border border-gray-100">
+                                        {item.className}
+                                    </div>
+                                    <div className="overflow-hidden">
+                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Topper</p>
+                                        {item.topper ? (
+                                            <p className="text-sm font-bold text-purple-700 truncate">
+                                                {item.topper.name.split(' ')[0]} {/* Show first name only for space */}
+                                            </p>
+                                        ) : (
+                                            <p className="text-xs font-bold text-gray-300 italic">No Data</p>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="flex-1">
-                                    <h2 className="font-bold text-lg text-gray-800">{cls.name} - {cls.section}</h2>
-                                    <p className="text-sm text-gray-400">{cls.students} Students</p>
+
+                                {/* MIDDLE: Score Display */}
+                                <div className="flex flex-col items-center justify-center w-[30%] border-l border-r border-gray-50 mx-1">
+                                    <p className="text-[9px] text-gray-400 font-medium uppercase tracking-wider">Score</p>
+                                    <p className={`text-sm font-black ${item.topper ? 'text-gray-800' : 'text-gray-200'}`}>
+                                        {item.topper ? item.topper.score : '-'}
+                                    </p>
+                                </div>
+
+                                {/* RIGHT: Rank Badge */}
+                                <div className="text-right w-[30%] flex justify-end">
+                                    {item.topper ? (
+                                        <div className="flex items-center gap-1 bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
+                                            <span className="text-xs">👑</span>
+                                            <span className="text-xs font-bold text-amber-600">
+                                                1 <span className="text-amber-300 text-[10px]">/ {item.totalStudents}</span>
+                                            </span>
+                                        </div>
+                                    ) : (
+                                        <div className="text-xs text-gray-300 font-medium">
+                                            {item.totalStudents} Std
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                            <button 
-                                onClick={() => navigate(`/teacher/class-manager`)}
-                                className="w-full mt-4 py-3 border border-purple-100 text-purple-600 font-bold rounded-xl text-sm hover:bg-purple-50 transition"
-                            >
-                                Manage Class
-                            </button>
-                        </div>
-                    ))}
+                        ))
+                    )}
                 </div>
             </div>
+
         </div>
     );
 }

@@ -16,6 +16,7 @@
     "appwrite": "^21.5.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "react-hook-form": "^7.69.0",
     "react-redux": "^9.2.0"
   },
   "devDependencies": {

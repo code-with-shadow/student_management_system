@@ -4,8 +4,12 @@ import { useSelector } from 'react-redux';
 
 function Footer() {
     const { userRole, classId, userData } = useSelector((state) => state.auth);
+    console.log(classId);
 
     const isTeacher = userRole === 'teacher';
+    console.log("classId in Footer:", classId);
+    console.log("userData in Footer:", userData);
+    console.log("userRole in Footer:", userRole);
 
     const menus = isTeacher ? [
         {
