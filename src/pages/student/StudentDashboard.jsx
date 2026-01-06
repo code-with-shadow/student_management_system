@@ -53,70 +53,80 @@ export default function StudentDashboard() {
                 setAttendanceMap(map);
 
                 // ============================================================
-                // ✅ FIXED LOGIC: FORCE CHECK EXAM 1, 2, 3
+                // ✅ RANK LOGIC (Including Zeros & Full Class Count)
                 // ============================================================
 
+                // A. Fetch ALL students in the class first (to get the correct total count)
+                const classStudentsRes = await service.getStudentsByClass(stud.class);
+                const classStudents = classStudentsRes?.documents || [];
+                const totalClassCount = classStudents.length;
 
                 const targetExams = ['1', '2', '3'];
                 const summaries = [];
 
-                // Fetch class data for ALL 3 exams in parallel to calculate ranks
+                // B. Fetch marks for all exams in parallel
                 const classDataPromises = targetExams.map(type =>
                     service.getExamMarksByClass(stud.class, type)
                 );
-
-                // Wait for all class data
+                
                 const classDataResults = await Promise.all(classDataPromises);
-
-                // Also gather all class marks for Overall Rank calculation
+                
+                // Also gather ALL class marks for Overall Rank calculation later
                 const allClassMarksFlat = classDataResults.flatMap(res => res?.documents || []);
-                // console.log(allClassMarksFlat);
-
-                // console.log("Class Data Results:", classDataResults);
-                // console.log("All Class Marks Flat:", allClassMarksFlat);
 
                 targetExams.forEach((examType, index) => {
-                    // A. My Data for this exam
+                    // --- 1. My Stats ---
                     const myExamMarks = myMarks.filter(m => String(m.examtype) === examType);
                     const hasMyData = myExamMarks.length > 0;
 
                     const myTotal = myExamMarks.reduce((sum, m) => sum + Number(m.score), 0);
                     const maxTotal = myExamMarks.reduce((sum, m) => sum + Number(m.totalmarks), 0);
-                    const percent = maxTotal > 0 ? Math.round((myTotal / maxTotal) * 100) : 0;
-
-                    // B. Class Data (for Rank)
+                    
+                    // --- 2. Class Stats (Ranking) ---
                     const examClassMarks = classDataResults[index]?.documents || [];
 
-                    // Group marks by student ID to get totals per student
+                    // Initialize every student with 0 (so those with no marks are still ranked at bottom)
                     const studentTotals = {};
+                    classStudents.forEach(s => {
+                        studentTotals[s.$id] = 0; // Use $id as key
+                    });
+
+                    // Add up marks for those who have them
                     examClassMarks.forEach(m => {
-                        const sid = m.studentid;
-                        if (!studentTotals[sid]) studentTotals[sid] = 0;
-                        studentTotals[sid] += Number(m.score);
+                        const score = Number(m.score) || 0;
+                        // Handle potential ID mismatch ($id vs userid)
+                        if (studentTotals.hasOwnProperty(m.studentid)) {
+                            studentTotals[m.studentid] += score;
+                        } else {
+                            // Try matching by UserID if StudentID didn't work
+                            const studentByUserId = classStudents.find(s => s.userid === m.studentid);
+                            if (studentByUserId) {
+                                studentTotals[studentByUserId.$id] += score;
+                            }
+                        }
                     });
 
                     // Sort scores high to low
                     const scores = Object.values(studentTotals).sort((a, b) => b - a);
 
-                    // Find my rank (1-based index)
-                    let myRank = "-";
-                    if (hasMyData) {
-                        const rankIndex = scores.indexOf(myTotal);
-                        myRank = rankIndex !== -1 ? rankIndex + 1 : "-";
-                    }
+                    // Find my rank
+                    // Note: We search for 'myTotal' in the sorted list.
+                    // Ideally we search by ID, but searching by score value is safe enough here if sorted correctly.
+                    // Better approach: Sort [ {id, score} ] and find index of my ID.
+                    
+                    const rankedList = Object.entries(studentTotals)
+                        .map(([id, score]) => ({ id, score }))
+                        .sort((a, b) => b.score - a.score);
 
-                    const totalStudents = scores.length || 0;
-                    // alert(totalStudents);
-
-                    // Save summary
+                    const myRankIndex = rankedList.findIndex(item => item.id === stud.$id);
+                    const myRank = myRankIndex !== -1 ? myRankIndex + 1 : "-";
 
                     summaries.push({
                         type: examType,
                         myTotal,
                         maxTotal,
-                        percent,
                         rank: myRank,
-                        totalStudents,
+                        totalStudents: totalClassCount, // Show full class size
                         hasData: hasMyData
                     });
                 });
@@ -124,53 +134,41 @@ export default function StudentDashboard() {
                 setExamSummaries(summaries);
 
                 // --- OVERALL RANK CALCULATION ---
-                // console.group("🏆 DEBUG OVERALL RANK");
-                // console.log("1. My Student Profile ID:", stud.$id);
-                // console.log("2. Total Class Marks Found:", allClassMarksFlat.length);
-
+                
+                // 1. Initialize Everyone with 0
                 const overallMap = {};
+                classStudents.forEach(s => { overallMap[s.$id] = 0; });
+
+                // 2. Sum ALL marks
                 allClassMarksFlat.forEach(m => {
-                    const sid = m.studentid;
-                    if (!overallMap[sid]) overallMap[sid] = 0;
-                    overallMap[sid] += Number(m.score);
+                    const score = Number(m.score) || 0;
+                    if (overallMap.hasOwnProperty(m.studentid)) {
+                        overallMap[m.studentid] += score;
+                    } else {
+                        const studentByUserId = classStudents.find(s => s.userid === m.studentid);
+                        if (studentByUserId) {
+                            overallMap[studentByUserId.$id] += score;
+                        }
+                    }
                 });
 
+                // 3. Sort & Find Me
                 const overallSorted = Object.entries(overallMap)
                     .map(([sid, total]) => ({ sid, total }))
                     .sort((a, b) => b.total - a.total);
 
-                // console.log("3. Calculated Totals (First 3):", overallSorted.slice(0, 3));
-
-                // 🔍 CHECK FOR ID MATCH
-                const myEntry = overallSorted.find(s => s.sid === stud.$id);
-                // console.log("4. Did I find myself?", myEntry ? "YES ✅" : "NO ❌");
-
                 const myOverallIndex = overallSorted.findIndex(s => s.sid === stud.$id);
 
                 if (myOverallIndex !== -1) {
-                    const finalRank = { rank: myOverallIndex + 1, total: overallSorted.length };
-                    setOverallRank(finalRank);
-                    // console.log("✅ SETTING RANK:", finalRank);
-                    // console.log(finalRank);
+                    setOverallRank({ rank: myOverallIndex + 1, total: totalClassCount });
                 } else {
-                    // console.warn("⚠️ Rank not set. Possible ID Mismatch. Check 'studentid' in marks vs 'stud.$id'.");
-                    // Fallback: If no match, try finding by UserData ID just in case
-                    const fallbackIndex = overallSorted.findIndex(s => s.sid === userData.$id);
-                    if (fallbackIndex !== -1) {
-                        // console.log("✅ Found using UserAuth ID instead!");
-                        setOverallRank({ rank: fallbackIndex + 1, total: overallSorted.length });
-                    } else {
-                        setOverallRank(null);
-                    }
+                    setOverallRank(null);
                 }
-                // console.groupEnd();
-                // console.log(overallRank?.rank, overallRank?.total);
 
-
-                // ============================================================
-                // calculate total subjects
-                setTotalSubjects(classSubjects[String(stud.class)].length)
-                
+                // Calculate Total Subjects
+                if (classSubjects[String(stud.class)]) {
+                    setTotalSubjects(classSubjects[String(stud.class)].length);
+                }
                 
             } catch (e) {
                 console.error("Dashboard Fetch Error:", e);
@@ -183,48 +181,13 @@ export default function StudentDashboard() {
     }, [userData]);
 
     // ============================================================
-    // 2. CALCULATIONS
+    // 2. CALCULATIONS (UI)
     // ============================================================
     const totalPresent = Object.values(attendanceMap).reduce((sum, days) => sum + Number(days), 0);
     const totalWorkingDays = 365;
     const attendancePercentage = totalWorkingDays > 0 ? Math.min(Math.round((totalPresent / totalWorkingDays) * 100), 100) : 0;
     const initials = student?.fullname ? student.fullname.substring(0, 2).toUpperCase() : "ST";
 
-    // Filter Marks for Detailed Rows
-    const exam1Marks = marks.filter(m => String(m.examtype) === "1");
-    const exam2Marks = marks.filter(m => String(m.examtype) === "2");
-    const exam3Marks = marks.filter(m => String(m.examtype) === "3");
-
-    // ============================================================
-    // 3. COMPONENT: Detailed Exam Row
-    // ============================================================
-    const ExamRow = ({ title, data, loading }) => (
-        <div className="mx-4 mt-6">
-            <h3 className="text-sm font-bold text-gray-600 ml-1 mb-3">{title}</h3>
-            {data.length === 0 ? (
-                <p className="text-center text-xs text-gray-400 py-4 bg-white rounded-xl border border-dashed">
-                    {loading ? "Loading..." : `No ${title} data available.`}
-                </p>
-            ) : (
-                <div className="bg-white rounded-2xl p-1 shadow-sm border border-gray-100">
-                    {data.map((mark, i) => (
-                        <div key={mark.$id} className={`flex justify-between items-center p-4 ${i !== data.length - 1 ? 'border-b border-gray-50' : ''}`}>
-                            <div>
-                                <p className="text-sm font-bold text-gray-800">{mark.subject}</p>
-                                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Exam Type {mark.examtype}</p>
-                            </div>
-                            <div className="text-right">
-                                {/* <p className="text-sm font-bold text-blue-600">{mark.score} <span className="text-gray-300 font-normal">/</span> {mark.totalmarks}</p>
-                                <p className={`text-[10px] font-bold ${mark.score >= 25 ? 'text-green-500' : 'text-red-400'}`}>
-                                    {mark.score >= 25 ? 'PASS' : 'FAIL'}
-                                </p> */}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
     return (
         <div className="min-h-screen bg-[#f8f7f3] pb-24 safe-area-top">
 
@@ -240,7 +203,7 @@ export default function StudentDashboard() {
                     <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center text-white text-xl font-bold shadow-md ring-4 ring-blue-50">
                         {initials}
                     </div>
-                   <div>
+                    <div>
                         <h2 className="text-lg font-bold text-gray-900 leading-tight">{student?.fullname || "Loading..."}</h2>
                         <p className="text-xs text-gray-500 mt-1">Roll No: {student?.roll}</p>
                         <div className="flex gap-2 mt-2">
@@ -288,16 +251,12 @@ export default function StudentDashboard() {
                 </div>
             </div>
 
-            {/* ============================================================ */}
-            {/* ✅ ACADEMIC OVERVIEW (3 Fixed Rows: Exam 1, 2, 3)           */}
-            {/* ============================================================ */}
-
+            {/* Academic Overview */}
             <div className="mx-4 mt-6">
                 <h3 className="text-sm font-bold text-gray-600 ml-1 mb-3">Academic Overview</h3>
 
                 <div className="flex flex-col gap-3">
                     {['1', '2', '3'].map((examType) => {
-                        // Check if we have calculated data for this exam type
                         const summary = examSummaries.find(s => s.type === examType);
                         const hasData = !!summary;
 
@@ -308,7 +267,7 @@ export default function StudentDashboard() {
                                     <h4 className="font-bold text-black text-sm">Exam {examType}</h4>
                                 </div>
 
-                                {/* Center: Score & Percent */}
+                                {/* Center: Score */}
                                 <div className="text-center">
                                     {hasData ? (
                                         <>
@@ -316,9 +275,6 @@ export default function StudentDashboard() {
                                             <p className="text-sm font-extrabold text-blue-600">
                                                 {summary.myTotal} <span className="text-gray-300 font-normal">/</span> {summary.maxTotal}
                                             </p>
-                                            {/* <p className={`text-[10px] font-bold ${summary.percent >= 35 ? 'text-green-500' : 'text-red-400'}`}>
-                                                {summary.percent}% {summary.percent >= 35 ? 'PASS' : 'FAIL'}
-                                            </p> */}
                                         </>
                                     ) : (
                                         <p className="text-xs font-bold text-gray-300">Pending</p>
@@ -345,12 +301,6 @@ export default function StudentDashboard() {
                     })}
                 </div>
             </div>
-
-            {/* --- DETAILED RESULTS --- */}
-
-            {/* <ExamRow title="Exam 1 Results" data={exam1Marks} loading={loading} />
-            <ExamRow title="Exam 2 Results" data={exam2Marks} loading={loading} />
-            <ExamRow title="Exam 3 Results" data={exam3Marks} loading={loading} /> */}
 
         </div>
     );

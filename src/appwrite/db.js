@@ -261,21 +261,22 @@ export class Service {
   }
 
   // Rank calculation helper
-  async getExamMarksByClass(className, examType) {
+  async getExamMarksByClass(classId, examType) {
     try {
       return await this.databases.listDocuments(
-        conf.databaseId,
-        conf.colMarks,
+        this.conf.databaseId,
+        this.conf.colMarks, // Your marks collection
         [
-          Query.equal("class", String(className)),
-          Query.equal("examtype", String(examType)), // ✅ STRING
+          Query.equal("class", classId),
+          Query.equal("examtype", examType),
+          Query.limit(1000), // 👈 ADD THIS LINE (Default is only 25)
         ]
       );
-    } catch {
-      return { documents: [] };
+    } catch (error) {
+      console.log("Appwrite service :: getExamMarksByClass :: error", error);
+      return false;
     }
   }
-
   // ============================================================
   // 5. CHAT & STORAGE (Fixed Preview)
   // ============================================================

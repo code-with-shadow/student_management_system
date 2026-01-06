@@ -1,82 +1,111 @@
 import React, { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import service from '../../appwrite/db';
 
 export default function TeacherDashboard() {
     const { userData } = useSelector((state) => state.auth);
     const [profile, setProfile] = useState(null);
+    
+    // State for the Class Leaders List
     const [classOverviews, setClassOverviews] = useState([]);
     const [loading, setLoading] = useState(true);
+    
     const navigate = useNavigate();
+    const location = useLocation(); 
 
     useEffect(() => {
         if (userData) {
             loadTeacherData();
             loadClassToppers();
         }
-    }, [userData]);
+    }, [userData, location]);
 
     const loadTeacherData = async () => {
         try {
             const p = await service.getTeacherProfile(userData.$id);
             setProfile(p || null);
         } catch (e) {
-            console.error(e);
+            console.error("Error loading teacher profile:", e);
         }
     };
 
+    // =========================================================================
+    // 🏆 CALCULATE OVERALL TOPPERS (Exam 1 + 2 + 3)
+    // =========================================================================
     const loadClassToppers = async () => {
+        console.clear(); 
+        console.log("🚀 STARTING OVERALL TOPPER CALCULATION...");
         setLoading(true);
+        
         const targetClasses = ['5', '6', '7', '8', '9', '10', '11', '12'];
-        const overviewData = [];
-
-        try {
-            await Promise.all(targetClasses.map(async (className) => {
+        const targetExams = ['1', '2', '3']; // ✅ We will fetch ALL of these
+        
+        const results = await Promise.all(targetClasses.map(async (className) => {
+            try {
+                // 1. Get Students
                 const studRes = await service.getStudentsByClass(className);
                 const students = studRes?.documents || [];
-                const totalStudents = students.length;
+                const totalStudents = students.length; 
 
                 if (totalStudents === 0) {
-                    overviewData.push({ className, topper: null, totalStudents: 0 });
-                    return;
+                    return { className, topper: null, totalStudents: 0 };
                 }
 
-                const marksRes = await service.getExamMarksByClass(className, '3'); 
-                const marks = marksRes?.documents || [];
+                // 2. Get Marks for ALL Exams (1, 2, 3) in Parallel
+                const examPromises = targetExams.map(examType => 
+                    service.getExamMarksByClass(className, examType)
+                );
+                
+                // Wait for all exams to return
+                const examResults = await Promise.all(examPromises);
+                
+                // Flatten results: [ [Exam1Marks], [Exam2Marks] ] -> [ AllMarks ]
+                const allMarks = examResults.flatMap(res => res?.documents || []);
 
+                // 3. Calculate Overall Totals per Student
                 const studentTotals = {}; 
-                marks.forEach(m => {
-                    studentTotals[m.studentid] = (studentTotals[m.studentid] || 0) + Number(m.score);
+                allMarks.forEach(m => {
+                    const score = Number(m.score) || 0;
+                    if(m.studentid) {
+                        // Sum up scores from all exams
+                        studentTotals[m.studentid] = (studentTotals[m.studentid] || 0) + score;
+                    }
                 });
 
+                // 4. Sort (High to Low - Based on Grand Total)
                 const sortedIDs = Object.keys(studentTotals).sort((a, b) => studentTotals[b] - studentTotals[a]);
-                
+
+                // 5. Find Topper Student
                 let topper = null;
                 if (sortedIDs.length > 0) {
                     const topperId = sortedIDs[0];
-                    const topperStudent = students.find(s => s.$id === topperId);
+                    const topperScore = studentTotals[topperId]; // This is the Grand Total Score
+
+                    // Try matching $id OR userid
+                    const topperStudent = students.find(s => s.$id === topperId || s.userid === topperId);
+                    
                     if (topperStudent) {
                         topper = {
                             name: topperStudent.fullname,
                             roll: topperStudent.roll,
-                            score: studentTotals[topperId],
+                            score: topperScore,
                             id: topperStudent.$id
                         };
                     }
                 }
 
-                overviewData.push({ className, topper, totalStudents });
-            }));
+                return { className, topper, totalStudents };
 
-            overviewData.sort((a, b) => Number(a.className) - Number(b.className));
-            setClassOverviews(overviewData);
+            } catch (err) {
+                console.error(`❌ ERROR in Class ${className}:`, err);
+                return { className, topper: null, totalStudents: 0, error: true };
+            }
+        }));
 
-        } catch (error) {
-            console.error("Error loading class toppers:", error);
-        } finally {
-            setLoading(false);
-        }
+        const validResults = results.filter(Boolean).sort((a, b) => Number(a.className) - Number(b.className));
+        setClassOverviews(validResults);
+        setLoading(false);
     };
 
     if (loading && !profile) return (
@@ -140,29 +169,30 @@ export default function TeacherDashboard() {
                     <span>Class</span>
                     <span>Performance</span>
                     <span>Leaders</span>
-                    <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-center">Exam 3</span>
+                    {/* ✅ UPDATED BADGE: Now shows "Overall Rank" instead of "Exam 3" */}
+                    <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-center">Overall Rank</span>
                 </h3>
                 
-                <div className="flex flex-col gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {loading ? (
-                        <p className="text-center text-xs text-gray-400 py-10">Calculating rankings...</p>
+                        <p className="col-span-full text-center text-xs text-gray-400 py-10">Calculating rankings...</p>
                     ) : (
                         classOverviews.map((item) => (
                             <div 
                                 key={item.className} 
-                                onClick={() => navigate(`/teacher/class/${item.className}`)} 
+                                // onClick={() => navigate(`/teacher/class/${item.className}`)} 
                                 className="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer hover:border-purple-300 transition-all active:scale-[0.98]"
                             >
                                 {/* LEFT: Class + Name */}
                                 <div className="flex items-center gap-3 w-[40%]">
-                                    <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center font-bold text-gray-500 text-sm border border-gray-100">
+                                    <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center font-bold text-gray-500 text-sm border border-gray-100 shadow-inner">
                                         {item.className}
                                     </div>
                                     <div className="overflow-hidden">
-                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wide">Topper</p>
+                                        <p className="text-[9px] text-gray-400 font-bold uppercase tracking-wide">Topper</p>
                                         {item.topper ? (
                                             <p className="text-sm font-bold text-purple-700 truncate">
-                                                {item.topper.name.split(' ')[0]} {/* Show first name only for space */}
+                                                {item.topper.name.split(' ')[0]}
                                             </p>
                                         ) : (
                                             <p className="text-xs font-bold text-gray-300 italic">No Data</p>
@@ -170,9 +200,9 @@ export default function TeacherDashboard() {
                                     </div>
                                 </div>
 
-                                {/* MIDDLE: Score Display */}
+                                {/* MIDDLE: Score Display (Grand Total) */}
                                 <div className="flex flex-col items-center justify-center w-[30%] border-l border-r border-gray-50 mx-1">
-                                    <p className="text-[9px] text-gray-400 font-medium uppercase tracking-wider">Score</p>
+                                    <p className="text-[9px] text-gray-400 font-medium uppercase tracking-wider">Total Score</p>
                                     <p className={`text-sm font-black ${item.topper ? 'text-gray-800' : 'text-gray-200'}`}>
                                         {item.topper ? item.topper.score : '-'}
                                     </p>
